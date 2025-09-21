@@ -6,6 +6,7 @@ pub mod types;
 pub mod time;
 pub mod crypto;
 pub mod fs_payload;
+pub mod fs;
 pub mod ahdr;
 pub mod onion;
 pub mod sphinx;
@@ -14,4 +15,3 @@ pub mod source;
 
 pub use types::*;
 pub use time::*;
-
