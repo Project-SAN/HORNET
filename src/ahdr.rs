@@ -112,9 +112,7 @@ pub fn create_ahdr(keys: &[Si], fses: &[Fs], rmax: usize, rng: &mut dyn RngCore)
 }
 
 // Algorithm 5: Nested AHDR construction (outer includes inner)
-pub fn create_nested_ahdr(_outer_keys: &[Si], _outer_fses: &[Fs], _inner: &Ahdr, rmax: usize, _rng: &mut dyn RngCore) -> Result<Ahdr> {
-    let mut bytes = Vec::with_capacity(rmax * C_BLOCK);
-    bytes.resize(rmax * C_BLOCK, 0);
-    // TODO
-    Ok(Ahdr { bytes })
+pub fn create_nested_ahdr(_outer_keys: &[Si], _outer_fses: &[Fs], _inner: &Ahdr, _rmax: usize, _rng: &mut dyn RngCore) -> Result<Ahdr> {
+    // TODO: Implement Algorithm 5 exactly. Placeholder to keep API stable.
+    Err(Error::NotImplemented)
 }

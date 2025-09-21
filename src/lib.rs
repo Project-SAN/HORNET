@@ -12,6 +12,7 @@ pub mod onion;
 pub mod sphinx;
 pub mod node;
 pub mod source;
+pub mod chdr;
 
 pub use types::*;
 pub use time::*;
