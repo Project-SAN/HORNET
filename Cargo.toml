@@ -7,6 +7,7 @@ edition = "2024"
 # Core is no_std by default. Enable `std` to unlock adapters/tests later.
 default = []
 std = []
+strict_sphinx = []
 
 [dependencies]
 # no_std-friendly cryptography building blocks
@@ -20,3 +21,4 @@ generic-array = { version = "0.14", default-features = false }
 subtle = { version = "2.5", default-features = false }
 zeroize = { version = "1.7", default-features = false, features = ["zeroize_derive"] }
 x25519-dalek = { version = "2", default-features = false }
+curve25519-dalek = { version = "3", default-features = false, features = ["u64_backend"] }

@@ -79,8 +79,8 @@ pub fn create_ahdr(keys: &[Si], fses: &[Fs], rmax: usize, rng: &mut dyn RngCore)
     mac_input.extend_from_slice(&fses[l - 1].0);
     mac_input.extend_from_slice(&beta);
     let mut gamma = mac::mac_trunc16(&hkey, &mac_input).0.to_vec();
-    // iterate i = l-2 .. 0
-    for i in (0..=(l - 1).saturating_sub(1)).rev() {
+    // iterate i = l-2 .. 0 (only if l >= 2)
+    for i in (0..l.saturating_sub(1)).rev() {
         // base = FSi+1 || gamma_{i+1} || beta_{i+1}[0..(r-2)c]
         let mut base = Vec::with_capacity((rmax - 1) * C_BLOCK);
         base.extend_from_slice(&fses[i + 1].0);

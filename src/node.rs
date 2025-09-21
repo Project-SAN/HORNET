@@ -29,3 +29,9 @@ pub fn process_data_backward(ctx: &mut NodeCtx, chdr: &mut Chdr, ahdr: &mut Ahdr
     chdr.specific = iv;
     (ctx.forward)(&res.r, chdr, &res.ahdr_next, payload)
 }
+
+// Optional helpers for setup path (per paper 4.3.4):
+// Given CHDR (with EXP) and per-hop symmetric key, create FS using EXP from CHDR.
+pub fn create_fs_from_setup(chdr: &Chdr, sv: &Sv, s: &crate::types::Si, r: &RoutingSegment) -> Result<crate::types::Fs> {
+    crate::fs::fs_create_from_chdr(sv, s, r, chdr)
+}

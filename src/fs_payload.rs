@@ -52,22 +52,24 @@ pub fn retrieve_fses(keys: &[Si], init_seed: &[u8; 16], payload: &FsPayload) -> 
     let mut pinit = vec![0u8; rc];
     prg::prg1(init_seed, &mut pinit);
     // ψ construction per Alg.2 line 3
+    let psi_len = l * C_BLOCK;
     let mut psi = pinit[(payload.rmax - l) * C_BLOCK .. rc].to_vec(); // length l*c
-    for t in 0..(l.saturating_sub(1)) {
+    // XOR with terms for t = 0..l-2
+    for t in 0..l.saturating_sub(1) {
         let start = (payload.rmax - l + 1 + t) * C_BLOCK;
         let mut mask_full = vec![0u8; rc];
         prg::prg0(&keys[t].0, &mut mask_full);
-        let slice = &mask_full[start..rc];
-        let mut m = vec![0u8; l * C_BLOCK];
-        // place slice at beginning, then zeros padding of (t+1)c
-        let copy_len = core::cmp::min(m.len().saturating_sub((t + 1) * C_BLOCK), slice.len());
+        let slice = &mask_full[start..rc]; // length (l-1-t)*c
+        let mut m = vec![0u8; psi_len];
+        let copy_len = core::cmp::min(slice.len(), psi_len.saturating_sub((t + 1) * C_BLOCK));
+        // place slice at beginning, leaving (t+1)c zeros at the end
         m[0..copy_len].copy_from_slice(&slice[0..copy_len]);
         for (a, b) in psi.iter_mut().zip(m.iter()) { *a ^= *b; }
     }
-    // Pfull = P || ψ
-    let mut pfull = Vec::with_capacity(rc + (l - 1) * C_BLOCK);
+    // Pfull = P || ψ (full length l*c)
+    let mut pfull = Vec::with_capacity(rc + psi_len);
     pfull.extend_from_slice(&payload.bytes);
-    pfull.extend_from_slice(&psi[0..(l - 1) * C_BLOCK]);
+    pfull.extend_from_slice(&psi);
     // Recover FSes in reverse
     let mut fses_rev: Vec<Fs> = Vec::with_capacity(l);
     for i in (0..l).rev() {
