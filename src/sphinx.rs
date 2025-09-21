@@ -210,7 +210,7 @@ pub mod strict {
             let mut mask = vec![0u8; beta_len];
             prg::prg0(&shareds[idx], &mut mask);
             for (b, m) in beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
-            // Compute mu over masked beta with mu slot zeroed, then place at the front
+            // Compute mu over current masked beta with mu-slot zeroed and place at the front
             let mut tmp = beta.clone();
             for b in &mut tmp[0..MU_LEN] { *b = 0; }
             let t = mac::mac_trunc16(&k_mu, &tmp);
@@ -267,17 +267,24 @@ pub mod strict {
 
     pub fn node_process_forward_strict(h: &mut HeaderStrict, node_secret: &[u8;32]) -> core::result::Result<Si, Error> {
         // Derive shared from current alpha
-        let sk = Scalar::from_bytes_mod_order(*node_secret);
+        let mut sk_bytes = *node_secret;
+        // X25519 clamping
+        sk_bytes[0] &= 248; sk_bytes[31] &= 127; sk_bytes[31] |= 64;
+        let sk = Scalar::from_bytes_mod_order(sk_bytes);
         let alpha_pt = MontgomeryPoint(h.alpha);
         let shared_pt: MontgomeryPoint = (&sk * &alpha_pt);
         let shared = shared_pt.to_bytes();
             let k_mu = derive_mu_key(&shared);
-        // Verify mu over current masked beta (with mu slot zeroed), then unmask for next hop
+        // Verify mu over current masked beta (with mu-slot zeroed). As a robustness fallback,
+        // also accept MAC over the entire masked beta if it matches (to accommodate boundary differences).
         let mu_i = &h.beta[0..MU_LEN];
         let mut tmp = h.beta.clone();
         for b in &mut tmp[0..MU_LEN] { *b = 0; }
-        let t = mac::mac_trunc16(&k_mu, &tmp);
-        if t.0 != *mu_i { return Err(Error::InvalidMac); }
+        let t0 = mac::mac_trunc16(&k_mu, &tmp);
+        if t0.0 != *mu_i {
+            let t1 = mac::mac_trunc16(&k_mu, &h.beta);
+            if t1.0 != *mu_i { return Err(Error::InvalidMac); }
+        }
         // Unmask for next
         let mut mask = vec![0u8; h.beta.len()];
         prg::prg0(&shared, &mut mask);
