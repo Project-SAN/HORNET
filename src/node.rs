@@ -1,4 +1,4 @@
-use crate::types::{Ahdr, Chdr, Error, Exp, Result, RoutingSegment, Sv};
+use crate::types::{Ahdr, Chdr, Exp, Result, RoutingSegment, Sv};
 use crate::ahdr::proc_ahdr;
 use crate::onion;
 

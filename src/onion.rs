@@ -1,5 +1,5 @@
 use crate::crypto::{prp, stream};
-use crate::types::{Error, Result, Si};
+use crate::types::{Result, Si};
 
 // {O', IV'} = ADD_LAYER(s, IV, O)
 pub fn add_layer(s: &Si, iv: &mut [u8; 16], payload: &mut [u8]) -> Result<()> {
@@ -14,4 +14,3 @@ pub fn remove_layer(s: &Si, iv: &mut [u8; 16], payload: &mut [u8]) -> Result<()>
     prp::prp_dec(&s.0, iv);
     Ok(())
 }
-

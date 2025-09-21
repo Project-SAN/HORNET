@@ -21,7 +21,6 @@ pub fn hop_key(input: &[u8], op: OpLabel, out: &mut [u8]) {
         OpLabel::Enc => b"ENC".as_slice(),
         OpLabel::Dec => b"DEC".as_slice(),
     };
-    let hk = Hkdf::<Sha256>::from_prk(input).expect("PRK length");
+    let hk = Hkdf::<Sha256>::new(None, input);
     hk.expand(info, out).expect("HKDF expand");
 }
-

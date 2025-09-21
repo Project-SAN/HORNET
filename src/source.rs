@@ -1,6 +1,5 @@
-use alloc::vec::Vec;
 use rand_core::RngCore;
-use crate::types::{Ahdr, Chdr, Error, Exp, Nonce, Result, Si, Fs};
+use crate::types::{Ahdr, Chdr, Error, Nonce, Result, Si, Fs};
 
 pub struct Session {
     pub ahdr_f: Ahdr,
