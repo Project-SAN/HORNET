@@ -253,8 +253,10 @@ pub mod strict {
             let mut mask = vec![0u8; beta_len];
             prg::prg0(&shareds[idx], &mut mask);
             for (b, m) in beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
-            // mu over remainder, place at front
-            let t = mac::mac_trunc16(&k_mu, &beta[MU_LEN..]);
+            // mu over masked beta with mu-slot zeroed, place at front
+            let mut tmp = beta.clone();
+            for b in &mut tmp[0..MU_LEN] { *b = 0; }
+            let t = mac::mac_trunc16(&k_mu, &tmp);
             mu.copy_from_slice(&t.0);
             beta[0..MU_LEN].copy_from_slice(&mu);
             // snapshot after processing this hop (state that hop idx will see)
@@ -289,9 +291,10 @@ pub mod strict {
         let mut mask = vec![0u8; h.beta.len()];
         prg::prg0(&shared, &mut mask);
         for (b,m) in h.beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
-        // Update mu for next hop
+        // Update mu for next hop: place next mu at the front so the next hop sees it
         let t2 = mac::mac_trunc16(&k_mu, &h.beta);
         h.mu.copy_from_slice(&t2.0);
+        h.beta[0..MU_LEN].copy_from_slice(&t2.0);
         // Update alpha by the same blinding used by the source for this hop
         let mut b_seed = [0u8;32];
         hop_key(&shared, OpLabel::Prp, &mut b_seed);
