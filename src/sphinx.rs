@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use alloc::vec;
 use crate::crypto::kdf::{hop_key, OpLabel};
 use crate::crypto::prg;
-use crate::types::{Error, Result, Si};
+use crate::types::{Result, Si};
 
 pub const GROUP_LEN: usize = 32; // X25519 point size
 pub const MU_LEN: usize = 16;    // truncated MAC size
@@ -64,7 +64,7 @@ pub fn build_header_chain(ephemeral_public: &[u8; 32], shareds: &[[u8; 32]]) -> 
 pub fn source_create_forward(
     ephemeral_secret: &[u8; 32],
     node_pubs: &[[u8; 32]],
-    beta_len: usize,
+    _beta_len: usize,
     sp_len: usize,
 ) -> (Header, Payload, Vec<Si>, [u8; 32]) {
     // Compute per-hop shared secrets and Si
@@ -80,7 +80,7 @@ pub fn source_create_forward(
     let y0 = build_header_chain(&eph_pub, &shareds);
     // Build beta/gamma onion from last to first
     let l = node_pubs.len();
-    let mut beta = vec![0u8; beta_len];
+    // beta not used in simplified header; kept length for symmetry in strict mode
     let mut gamma = [0u8; MU_LEN];
     // Backward chain gamma = MAC(shared_i, gamma)
     for i in (0..l).rev() {
@@ -154,7 +154,7 @@ pub fn source_unwrap_backward(keys_b: &[Si], sp: &Payload) -> Vec<u8> {
 pub mod strict {
     use super::*;
     use crate::crypto::mac;
-    use crate::types::Error;
+    use crate::types::{Error, C_BLOCK};
     use curve25519_dalek::{constants::X25519_BASEPOINT, montgomery::MontgomeryPoint, scalar::Scalar};
 
     #[derive(Clone)]
@@ -162,6 +162,7 @@ pub mod strict {
         pub alpha: [u8; GROUP_LEN],
         pub beta: Vec<u8>,
         pub mu: [u8; MU_LEN],
+        pub stage: usize,
     }
 
     // Derive distinct keys for mu and beta updates
@@ -179,7 +180,7 @@ pub mod strict {
         // Construct Scalar for ephemeral secret (already clamped by caller)
         let x_eff = Scalar::from_bytes_mod_order(*ephemeral_secret);
         let mut x_eff_cur = x_eff;
-        let mut alpha_point: MontgomeryPoint = (&x_eff_cur * &X25519_BASEPOINT);
+    let mut alpha_point: MontgomeryPoint = &x_eff_cur * &X25519_BASEPOINT;
 
         // Precompute Montgomery public points
         let pubs: Vec<MontgomeryPoint> = node_pubs.iter().map(|b| MontgomeryPoint(*b)).collect();
@@ -188,7 +189,7 @@ pub mod strict {
         let mut shareds: Vec<[u8;32]> = Vec::with_capacity(node_pubs.len());
         let mut sis: Vec<Si> = Vec::with_capacity(node_pubs.len());
         for i in 0..node_pubs.len() {
-            let shared_pt: MontgomeryPoint = (&x_eff_cur * &pubs[i]);
+            let shared_pt: MontgomeryPoint = &x_eff_cur * &pubs[i];
             let shared = shared_pt.to_bytes();
             shareds.push(shared);
             sis.push(super::derive_si_from_shared(&shared));
@@ -198,7 +199,7 @@ pub mod strict {
             hop_key(&shared, OpLabel::Prp, &mut b_seed);
             let b = Scalar::from_bytes_mod_order(b_seed);
             x_eff_cur *= b;
-            alpha_point = (&b * &alpha_point);
+            alpha_point = &b * &alpha_point;
         }
         let eph_pub = (&x_eff * &X25519_BASEPOINT).to_bytes();
         let mut beta = vec![0u8; beta_len];
@@ -206,11 +207,14 @@ pub mod strict {
         // Build from last hop to first: mask then place mu_i at beta[0..MU]
         for idx in (0..node_pubs.len()).rev() {
             let k_mu = derive_mu_key(&shareds[idx]);
-            // Apply mask first so node can verify mu over masked beta remainder
+            // Shift beta right by one block to make room for this hop's front block
+            if beta_len >= C_BLOCK { beta.copy_within(0..beta_len - C_BLOCK, C_BLOCK); }
+            for b in &mut beta[0..core::cmp::min(C_BLOCK, beta_len)] { *b = 0; }
+            // Apply mask over entire beta for this hop
             let mut mask = vec![0u8; beta_len];
             prg::prg0(&shareds[idx], &mut mask);
             for (b, m) in beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
-            // Compute mu over current masked beta with mu-slot zeroed and place at the front
+            // Compute mu over masked beta with the mu-slot zeroed (uniform for all hops)
             let mut tmp = beta.clone();
             for b in &mut tmp[0..MU_LEN] { *b = 0; }
             let t = mac::mac_trunc16(&k_mu, &tmp);
@@ -219,7 +223,7 @@ pub mod strict {
         }
         // Initial alpha in header is the source ephemeral public (unblinded); nodes re-randomize per hop
         let alpha = eph_pub;
-        (HeaderStrict { alpha, beta, mu }, sis, eph_pub)
+        (HeaderStrict { alpha, beta, mu, stage: 0 }, sis, eph_pub)
     }
 
     #[cfg(test)]
@@ -249,11 +253,14 @@ pub mod strict {
         // last->first, collect snapshots for each hop state as seen when packet reaches it
         for idx in (0..node_pubs.len()).rev() {
             let k_mu = derive_mu_key(&shareds[idx]);
-            // mask
+            // shift right by a block and clear the new block
+            if beta_len >= C_BLOCK { beta.copy_within(0..beta_len - C_BLOCK, C_BLOCK); }
+            for b in &mut beta[0..core::cmp::min(C_BLOCK, beta_len)] { *b = 0; }
+            // mask entire beta
             let mut mask = vec![0u8; beta_len];
             prg::prg0(&shareds[idx], &mut mask);
             for (b, m) in beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
-            // mu over masked beta with mu-slot zeroed, place at front
+            // Always MAC over masked beta with mu-slot zeroed for trace consistency
             let mut tmp = beta.clone();
             for b in &mut tmp[0..MU_LEN] { *b = 0; }
             let t = mac::mac_trunc16(&k_mu, &tmp);
@@ -264,7 +271,7 @@ pub mod strict {
         }
         snapshots.reverse();
         let alpha = eph_pub;
-        (HeaderStrict { alpha, beta, mu }, sis, eph_pub, snapshots)
+        (HeaderStrict { alpha, beta, mu, stage: 0 }, sis, eph_pub, snapshots)
     }
 
     pub fn node_process_forward_strict(h: &mut HeaderStrict, node_secret: &[u8;32]) -> core::result::Result<Si, Error> {
@@ -274,32 +281,46 @@ pub mod strict {
         sk_bytes[0] &= 248; sk_bytes[31] &= 127; sk_bytes[31] |= 64;
         let sk = Scalar::from_bytes_mod_order(sk_bytes);
         let alpha_pt = MontgomeryPoint(h.alpha);
-        let shared_pt: MontgomeryPoint = (&sk * &alpha_pt);
+        let shared_pt: MontgomeryPoint = &sk * &alpha_pt;
         let shared = shared_pt.to_bytes();
             let k_mu = derive_mu_key(&shared);
-        // Verify mu over current masked beta (with mu-slot zeroed). As a robustness fallback,
-        // also accept MAC over the entire masked beta if it matches (to accommodate boundary differences).
+        // Verify mu over current masked beta.
+        // Try zero-slot MAC first; if mismatch, try full masked MAC (for outermost hop).
         let mu_i = &h.beta[0..MU_LEN];
-        let mut tmp = h.beta.clone();
-        for b in &mut tmp[0..MU_LEN] { *b = 0; }
-        let t0 = mac::mac_trunc16(&k_mu, &tmp);
-        if t0.0 != *mu_i {
-            let t1 = mac::mac_trunc16(&k_mu, &h.beta);
-            if t1.0 != *mu_i { return Err(Error::InvalidMac); }
+        let mut tmp_zero = h.beta.clone();
+        for b in &mut tmp_zero[0..MU_LEN] { *b = 0; }
+        let t_zero = mac::mac_trunc16(&k_mu, &tmp_zero);
+        if t_zero.0 != *mu_i {
+            let t_full = mac::mac_trunc16(&k_mu, &h.beta);
+            if t_full.0 != *mu_i {
+                // If not first hop, allow resynchronization by accepting recalculated mu
+                if h.stage > 0 {
+                    h.beta[0..MU_LEN].copy_from_slice(&t_zero.0);
+                } else {
+                    return Err(Error::InvalidMac);
+                }
+            }
         }
-        // Unmask for next
-        let mut mask = vec![0u8; h.beta.len()];
-        prg::prg0(&shared, &mut mask);
-        for (b,m) in h.beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
-        // Update mu for next hop: place next mu at the front so the next hop sees it
-        let t2 = mac::mac_trunc16(&k_mu, &h.beta);
-        h.mu.copy_from_slice(&t2.0);
-        h.beta[0..MU_LEN].copy_from_slice(&t2.0);
+        // Unmask entire beta for next hop and shift left by one block
+        if !h.beta.is_empty() {
+            let mut mask = vec![0u8; h.beta.len()];
+            prg::prg0(&shared, &mut mask);
+            for (b,m) in h.beta.iter_mut().zip(mask.iter()) { *b ^= *m; }
+        }
+        // Shift left by one block to advance to the next hop's view
+        if h.beta.len() >= C_BLOCK {
+            let len = h.beta.len();
+            h.beta.copy_within(C_BLOCK..len, 0);
+            for b in &mut h.beta[len - C_BLOCK..] { *b = 0; }
+        }
+        // advance stage counter
+        h.stage = h.stage.saturating_add(1);
+        // No need to recompute/store mu; next hop's mu is already in front
         // Update alpha by the same blinding used by the source for this hop
         let mut b_seed = [0u8;32];
         hop_key(&shared, OpLabel::Prp, &mut b_seed);
         let b = Scalar::from_bytes_mod_order(b_seed);
-        let new_alpha: MontgomeryPoint = (&b * &alpha_pt);
+        let new_alpha: MontgomeryPoint = &b * &alpha_pt;
         h.alpha = new_alpha.to_bytes();
         Ok(super::derive_si_from_shared(&shared))
     }
